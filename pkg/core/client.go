@@ -63,9 +63,6 @@ func NewClient(serverAddr string, protocol string, auth []byte, tlsConfig *tls.C
 		tlsConfig:         tlsConfig,
 		quicConfig:        quicConfig,
 	}
-	if err := c.connectToServer(); err != nil {
-		return nil, err
-	}
 	return c, nil
 }
 
@@ -162,6 +159,12 @@ func (c *Client) openStreamWithReconnect() (quic.Connection, quic.Stream, error)
 	defer c.reconnectMutex.Unlock()
 	if c.closed {
 		return nil, nil, ErrClosed
+	}
+	if c.quicSession == nil {
+		if err := c.connectToServer(); err != nil {
+			// Still error, oops
+			return nil, nil, err
+		}
 	}
 	stream, err := c.quicSession.OpenStream()
 	if err == nil {
