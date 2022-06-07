@@ -326,6 +326,10 @@ type UDPConn interface {
 	ReadFrom() ([]byte, string, error)
 	WriteTo([]byte, string) error
 	Close() error
+	LocalAddr() net.Addr
+	SetDeadline(t time.Time) error
+	SetReadDeadline(t time.Time) error
+	SetWriteDeadline(t time.Time) error
 }
 
 type quicPktConn struct {
@@ -399,4 +403,20 @@ func (c *quicPktConn) WriteTo(p []byte, addr string) error {
 func (c *quicPktConn) Close() error {
 	c.CloseFunc()
 	return c.Stream.Close()
+}
+
+func (c *quicPktConn) LocalAddr() net.Addr {
+	return c.Session.LocalAddr()
+}
+
+func (c *quicPktConn) SetDeadline(t time.Time) error {
+	return c.Stream.SetDeadline(t)
+}
+
+func (c *quicPktConn) SetReadDeadline(t time.Time) error {
+	return c.Stream.SetReadDeadline(t)
+}
+
+func (c *quicPktConn) SetWriteDeadline(t time.Time) error {
+	return c.Stream.SetWriteDeadline(t)
 }
