@@ -3,16 +3,14 @@ package udp
 import (
 	"github.com/tobyxdd/hysteria/pkg/obfs"
 	"net"
-	"os"
 	"sync"
-	"syscall"
 	"time"
 )
 
 const udpBufferSize = 65535
 
 type ObfsUDPConn struct {
-	orig *net.UDPConn
+	orig net.PacketConn
 	obfs obfs.Obfuscator
 
 	readBuf    []byte
@@ -21,7 +19,7 @@ type ObfsUDPConn struct {
 	writeMutex sync.Mutex
 }
 
-func NewObfsUDPConn(orig *net.UDPConn, obfs obfs.Obfuscator) *ObfsUDPConn {
+func NewObfsUDPConn(orig net.PacketConn, obfs obfs.Obfuscator) *ObfsUDPConn {
 	return &ObfsUDPConn{
 		orig:     orig,
 		obfs:     obfs,
@@ -80,20 +78,4 @@ func (c *ObfsUDPConn) SetReadDeadline(t time.Time) error {
 
 func (c *ObfsUDPConn) SetWriteDeadline(t time.Time) error {
 	return c.orig.SetWriteDeadline(t)
-}
-
-func (c *ObfsUDPConn) SetReadBuffer(bytes int) error {
-	return c.orig.SetReadBuffer(bytes)
-}
-
-func (c *ObfsUDPConn) SetWriteBuffer(bytes int) error {
-	return c.orig.SetWriteBuffer(bytes)
-}
-
-func (c *ObfsUDPConn) SyscallConn() (syscall.RawConn, error) {
-	return c.orig.SyscallConn()
-}
-
-func (c *ObfsUDPConn) File() (f *os.File, err error) {
-	return c.orig.File()
 }

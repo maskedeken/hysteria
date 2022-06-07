@@ -5,16 +5,14 @@ import (
 	"github.com/tobyxdd/hysteria/pkg/obfs"
 	"math/rand"
 	"net"
-	"os"
 	"sync"
-	"syscall"
 	"time"
 )
 
 const udpBufferSize = 65535
 
 type ObfsWeChatUDPConn struct {
-	orig *net.UDPConn
+	orig net.PacketConn
 	obfs obfs.Obfuscator
 
 	readBuf    []byte
@@ -24,7 +22,7 @@ type ObfsWeChatUDPConn struct {
 	sn         uint32
 }
 
-func NewObfsWeChatUDPConn(orig *net.UDPConn, obfs obfs.Obfuscator) *ObfsWeChatUDPConn {
+func NewObfsWeChatUDPConn(orig net.PacketConn, obfs obfs.Obfuscator) *ObfsWeChatUDPConn {
 	return &ObfsWeChatUDPConn{
 		orig:     orig,
 		obfs:     obfs,
@@ -95,20 +93,4 @@ func (c *ObfsWeChatUDPConn) SetReadDeadline(t time.Time) error {
 
 func (c *ObfsWeChatUDPConn) SetWriteDeadline(t time.Time) error {
 	return c.orig.SetWriteDeadline(t)
-}
-
-func (c *ObfsWeChatUDPConn) SetReadBuffer(bytes int) error {
-	return c.orig.SetReadBuffer(bytes)
-}
-
-func (c *ObfsWeChatUDPConn) SetWriteBuffer(bytes int) error {
-	return c.orig.SetWriteBuffer(bytes)
-}
-
-func (c *ObfsWeChatUDPConn) SyscallConn() (syscall.RawConn, error) {
-	return c.orig.SyscallConn()
-}
-
-func (c *ObfsWeChatUDPConn) File() (f *os.File, err error) {
-	return c.orig.File()
 }

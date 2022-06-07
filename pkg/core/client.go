@@ -66,8 +66,8 @@ func NewClient(serverAddr string, protocol string, auth []byte, tlsConfig *tls.C
 	return c, nil
 }
 
-func (c *Client) connectToServer() error {
-	qs, err := c.transport.QUICDial(c.protocol, c.serverAddr, c.tlsConfig, c.quicConfig, c.obfuscator)
+func (c *Client) connectToServer(dialer transport.PacketDialer) error {
+	qs, err := c.transport.QUICDial(c.protocol, c.serverAddr, c.tlsConfig, c.quicConfig, c.obfuscator, dialer)
 	if err != nil {
 		return err
 	}
@@ -154,14 +154,14 @@ func (c *Client) handleMessage(qs quic.Connection) {
 	}
 }
 
-func (c *Client) openStreamWithReconnect() (quic.Connection, quic.Stream, error) {
+func (c *Client) openStreamWithReconnect(dialer transport.PacketDialer) (quic.Connection, quic.Stream, error) {
 	c.reconnectMutex.Lock()
 	defer c.reconnectMutex.Unlock()
 	if c.closed {
 		return nil, nil, ErrClosed
 	}
 	if c.quicSession == nil {
-		if err := c.connectToServer(); err != nil {
+		if err := c.connectToServer(dialer); err != nil {
 			// Still error, oops
 			return nil, nil, err
 		}
@@ -177,7 +177,7 @@ func (c *Client) openStreamWithReconnect() (quic.Connection, quic.Stream, error)
 		return nil, nil, err
 	}
 	// Permanent error, need to reconnect
-	if err := c.connectToServer(); err != nil {
+	if err := c.connectToServer(dialer); err != nil {
 		// Still error, oops
 		return nil, nil, err
 	}
@@ -186,12 +186,12 @@ func (c *Client) openStreamWithReconnect() (quic.Connection, quic.Stream, error)
 	return c.quicSession, &wrappedQUICStream{stream}, err
 }
 
-func (c *Client) DialTCP(addr string) (net.Conn, error) {
+func (c *Client) DialTCP(addr string, dialer transport.PacketDialer) (net.Conn, error) {
 	host, port, err := utils.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
 	}
-	session, stream, err := c.openStreamWithReconnect()
+	session, stream, err := c.openStreamWithReconnect(dialer)
 	if err != nil {
 		return nil, err
 	}
@@ -223,8 +223,8 @@ func (c *Client) DialTCP(addr string) (net.Conn, error) {
 	}, nil
 }
 
-func (c *Client) DialUDP() (UDPConn, error) {
-	session, stream, err := c.openStreamWithReconnect()
+func (c *Client) DialUDP(dialer transport.PacketDialer) (UDPConn, error) {
+	session, stream, err := c.openStreamWithReconnect(dialer)
 	if err != nil {
 		return nil, err
 	}

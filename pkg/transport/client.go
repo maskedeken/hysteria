@@ -26,9 +26,9 @@ var DefaultClientTransport = &ClientTransport{
 	PrefEnabled: false,
 }
 
-func (ct *ClientTransport) quicPacketConn(proto string, server string, obfs obfs.Obfuscator) (net.PacketConn, error) {
+func (ct *ClientTransport) quicPacketConn(proto string, server string, obfs obfs.Obfuscator, dialer PacketDialer) (net.PacketConn, error) {
 	if len(proto) == 0 || proto == "udp" {
-		conn, err := net.ListenUDP("udp", nil)
+		conn, err := dialer.ListenPacket()
 		if err != nil {
 			return nil, err
 		}
@@ -39,7 +39,7 @@ func (ct *ClientTransport) quicPacketConn(proto string, server string, obfs obfs
 			return conn, nil
 		}
 	} else if proto == "wechat-video" {
-		conn, err := net.ListenUDP("udp", nil)
+		conn, err := dialer.ListenPacket()
 		if err != nil {
 			return nil, err
 		}
@@ -66,12 +66,16 @@ func (ct *ClientTransport) quicPacketConn(proto string, server string, obfs obfs
 	}
 }
 
-func (ct *ClientTransport) QUICDial(proto string, server string, tlsConfig *tls.Config, quicConfig *quic.Config, obfs obfs.Obfuscator) (quic.Connection, error) {
+type PacketDialer interface {
+	ListenPacket() (net.PacketConn, error)
+}
+
+func (ct *ClientTransport) QUICDial(proto string, server string, tlsConfig *tls.Config, quicConfig *quic.Config, obfs obfs.Obfuscator, dialer PacketDialer) (quic.Connection, error) {
 	serverUDPAddr, err := net.ResolveUDPAddr("udp", server)
 	if err != nil {
 		return nil, err
 	}
-	pktConn, err := ct.quicPacketConn(proto, server, obfs)
+	pktConn, err := ct.quicPacketConn(proto, server, obfs, dialer)
 	if err != nil {
 		return nil, err
 	}
