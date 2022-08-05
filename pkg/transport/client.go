@@ -4,13 +4,14 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net"
+	"time"
+
 	"github.com/lucas-clemente/quic-go"
 	"github.com/tobyxdd/hysteria/pkg/conns/faketcp"
 	"github.com/tobyxdd/hysteria/pkg/conns/udp"
 	"github.com/tobyxdd/hysteria/pkg/conns/wechat"
 	"github.com/tobyxdd/hysteria/pkg/obfs"
-	"net"
-	"time"
 )
 
 type ClientTransport struct {
@@ -72,7 +73,21 @@ type PacketDialer interface {
 	Context() context.Context
 }
 
+type defaultPacketDialer struct{}
+
+func (dialer *defaultPacketDialer) ListenPacket() (net.PacketConn, error) {
+	return net.ListenUDP("udp", nil)
+}
+
+func (dialer *defaultPacketDialer) Context() context.Context {
+	return context.Background()
+}
+
 func (ct *ClientTransport) QUICDial(proto string, server string, tlsConfig *tls.Config, quicConfig *quic.Config, obfs obfs.Obfuscator, dialer PacketDialer) (quic.Connection, error) {
+	if dialer == nil {
+		dialer = &defaultPacketDialer{}
+	}
+
 	serverUDPAddr, err := net.ResolveUDPAddr("udp", server)
 	if err != nil {
 		return nil, err

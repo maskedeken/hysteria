@@ -56,7 +56,7 @@ func (r *TCPRedirect) ListenAndServe() error {
 				return
 			}
 			r.ConnFunc(c.RemoteAddr(), dest)
-			rc, err := r.HyClient.DialTCP(dest.String())
+			rc, err := r.HyClient.DialTCP(dest.String(), nil)
 			if err != nil {
 				r.ErrorFunc(c.RemoteAddr(), dest, err)
 				return

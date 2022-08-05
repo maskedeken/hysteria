@@ -1,10 +1,11 @@
 package relay
 
 import (
-	"github.com/tobyxdd/hysteria/pkg/core"
-	"github.com/tobyxdd/hysteria/pkg/utils"
 	"net"
 	"time"
+
+	"github.com/tobyxdd/hysteria/pkg/core"
+	"github.com/tobyxdd/hysteria/pkg/utils"
 )
 
 type TCPRelay struct {
@@ -48,7 +49,7 @@ func (r *TCPRelay) ListenAndServe() error {
 		go func() {
 			defer c.Close()
 			r.ConnFunc(c.RemoteAddr())
-			rc, err := r.HyClient.DialTCP(r.Remote)
+			rc, err := r.HyClient.DialTCP(r.Remote, nil)
 			if err != nil {
 				r.ErrorFunc(c.RemoteAddr(), err)
 				return

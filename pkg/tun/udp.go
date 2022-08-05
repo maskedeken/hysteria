@@ -5,12 +5,13 @@ package tun
 
 import (
 	"errors"
-	tun2socks "github.com/eycorsican/go-tun2socks/core"
-	"github.com/tobyxdd/hysteria/pkg/core"
 	"net"
 	"strconv"
 	"sync/atomic"
 	"time"
+
+	tun2socks "github.com/eycorsican/go-tun2socks/core"
+	"github.com/tobyxdd/hysteria/pkg/core"
 )
 
 const udpBufferSize = 65535
@@ -73,7 +74,7 @@ func (s *Server) Connect(conn tun2socks.UDPConn, target *net.UDPAddr) error {
 			s.ErrorFunc(conn.LocalAddr(), target.String(), closeErr)
 		}
 	}()
-	hyConn, closeErr = s.HyClient.DialUDP()
+	hyConn, closeErr = s.HyClient.DialUDP(nil)
 	if closeErr != nil {
 		return closeErr
 	}

@@ -2,11 +2,12 @@ package relay
 
 import (
 	"errors"
-	"github.com/tobyxdd/hysteria/pkg/core"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/tobyxdd/hysteria/pkg/core"
 )
 
 const udpBufferSize = 65535
@@ -72,7 +73,7 @@ func (r *UDPRelay) ListenAndServe() error {
 			} else {
 				// New
 				r.ConnFunc(rAddr)
-				hyConn, err := r.HyClient.DialUDP()
+				hyConn, err := r.HyClient.DialUDP(nil)
 				if err != nil {
 					r.ErrorFunc(rAddr, err)
 				} else {

@@ -55,7 +55,7 @@ func (r *UDPTProxy) ListenAndServe() error {
 				r.ErrorFunc(srcAddr, dstAddr, err)
 				continue
 			}
-			hyConn, err := r.HyClient.DialUDP()
+			hyConn, err := r.HyClient.DialUDP(nil)
 			if err != nil {
 				r.ErrorFunc(srcAddr, dstAddr, err)
 				_ = localConn.Close()

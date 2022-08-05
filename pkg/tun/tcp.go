@@ -4,9 +4,10 @@
 package tun
 
 import (
+	"net"
+
 	tun2socks "github.com/eycorsican/go-tun2socks/core"
 	"github.com/tobyxdd/hysteria/pkg/utils"
-	"net"
 )
 
 func (s *Server) Handle(conn net.Conn, target *net.TCPAddr) error {
@@ -19,7 +20,7 @@ func (s *Server) Handle(conn net.Conn, target *net.TCPAddr) error {
 			s.ErrorFunc(conn.LocalAddr(), target.String(), closeErr)
 		}
 	}()
-	rc, err := s.HyClient.DialTCP(target.String())
+	rc, err := s.HyClient.DialTCP(target.String(), nil)
 	if err != nil {
 		closeErr = err
 		return err

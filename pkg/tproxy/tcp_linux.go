@@ -51,7 +51,7 @@ func (r *TCPTProxy) ListenAndServe() error {
 			// So our LocalAddr is actually the target to which the user is trying to connect
 			// and our RemoteAddr is the local address where the user initiates the connection
 			r.ConnFunc(c.RemoteAddr(), c.LocalAddr())
-			rc, err := r.HyClient.DialTCP(c.LocalAddr().String())
+			rc, err := r.HyClient.DialTCP(c.LocalAddr().String(), nil)
 			if err != nil {
 				r.ErrorFunc(c.RemoteAddr(), c.LocalAddr(), err)
 				return
