@@ -2,7 +2,7 @@
 
 [![License][1]][2] [![Release][3]][4] [![Telegram][5]][6] [![Discussions][7]][8]
 
-[1]: https://img.shields.io/github/license/tobyxdd/hysteria?style=flat-square
+[1]: https://img.shields.io/badge/license-MIT-blue
 
 [2]: LICENSE.md
 
@@ -29,7 +29,7 @@ congested public Wi-Fi, connecting from China to servers abroad) powered by a cu
 - TUN (TAP on Windows)
 - Still growing...
 
-**[Documentation has now been moved to our wiki](https://github.com/HyNetwork/hysteria/wiki)**
+**[See wiki for documentation](https://github.com/HyNetwork/hysteria/wiki)**
 
 ----------
 
@@ -43,7 +43,7 @@ Hysteria 是一个功能丰富的，专为恶劣网络环境进行优化的网�
 - TUN (Windows 下为 TAP)
 - 仍在增加中...
 
-**[文档现已移动到 wiki](https://github.com/HyNetwork/hysteria/wiki/%E9%A6%96%E9%A1%B5)**
+**[文档请见 wiki](https://github.com/HyNetwork/hysteria/wiki/%E9%A6%96%E9%A1%B5)**
 
 ----------
 
