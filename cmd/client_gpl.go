@@ -4,13 +4,14 @@
 package main
 
 import (
-	"github.com/sirupsen/logrus"
-	"github.com/tobyxdd/hysteria/pkg/core"
-	"github.com/tobyxdd/hysteria/pkg/tun"
 	"io"
 	"net"
 	"strings"
 	"time"
+
+	"github.com/sirupsen/logrus"
+	"github.com/tobyxdd/hysteria/pkg/core"
+	"github.com/tobyxdd/hysteria/pkg/tun"
 )
 
 const license = `Hysteria is a feature-packed proxy & relay utility optimized for lossy, unstable connections.
@@ -42,32 +43,32 @@ func startTUN(config *clientConfig, client *core.Client, errChan chan error) {
 	}
 	tunServer.RequestFunc = func(addr net.Addr, reqAddr string) {
 		logrus.WithFields(logrus.Fields{
-			"src": addr.String(),
-			"dst": reqAddr,
+			"src": defaultIPMasker.Mask(addr.String()),
+			"dst": defaultIPMasker.Mask(reqAddr),
 		}).Debugf("TUN %s request", strings.ToUpper(addr.Network()))
 	}
 	tunServer.ErrorFunc = func(addr net.Addr, reqAddr string, err error) {
 		if err != nil {
 			if err == io.EOF {
 				logrus.WithFields(logrus.Fields{
-					"src": addr.String(),
-					"dst": reqAddr,
+					"src": defaultIPMasker.Mask(addr.String()),
+					"dst": defaultIPMasker.Mask(reqAddr),
 				}).Debugf("TUN %s EOF", strings.ToUpper(addr.Network()))
 			} else if err == core.ErrClosed && strings.HasPrefix(addr.Network(), "udp") {
 				logrus.WithFields(logrus.Fields{
-					"src": addr.String(),
-					"dst": reqAddr,
+					"src": defaultIPMasker.Mask(addr.String()),
+					"dst": defaultIPMasker.Mask(reqAddr),
 				}).Debugf("TUN %s closed for timeout", strings.ToUpper(addr.Network()))
 			} else if nErr, ok := err.(net.Error); ok && nErr.Timeout() && strings.HasPrefix(addr.Network(), "tcp") {
 				logrus.WithFields(logrus.Fields{
-					"src": addr.String(),
-					"dst": reqAddr,
+					"src": defaultIPMasker.Mask(addr.String()),
+					"dst": defaultIPMasker.Mask(reqAddr),
 				}).Debugf("TUN %s closed for timeout", strings.ToUpper(addr.Network()))
 			} else {
 				logrus.WithFields(logrus.Fields{
 					"error": err,
-					"src":   addr.String(),
-					"dst":   reqAddr,
+					"src":   defaultIPMasker.Mask(addr.String()),
+					"dst":   defaultIPMasker.Mask(reqAddr),
 				}).Infof("TUN %s error", strings.ToUpper(addr.Network()))
 			}
 		}

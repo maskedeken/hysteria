@@ -1,10 +1,11 @@
 package udp
 
 import (
-	"github.com/tobyxdd/hysteria/pkg/obfs"
 	"net"
 	"sync"
 	"time"
+
+	"github.com/tobyxdd/hysteria/pkg/obfs"
 )
 
 const udpBufferSize = 65535

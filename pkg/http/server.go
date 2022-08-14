@@ -19,7 +19,8 @@ import (
 
 func NewProxyHTTPServer(hyClient *core.Client, transport *transport.ClientTransport, idleTimeout time.Duration,
 	aclEngine *acl.Engine, newDialFunc func(reqAddr string, action acl.Action, arg string),
-	basicAuthFunc func(user, password string) bool) (*goproxy.ProxyHttpServer, error) {
+	basicAuthFunc func(user, password string) bool,
+) (*goproxy.ProxyHttpServer, error) {
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Logger = &nopLogger{}
 	proxy.NonproxyHandler = http.NotFoundHandler()

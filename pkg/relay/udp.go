@@ -25,7 +25,8 @@ type UDPRelay struct {
 }
 
 func NewUDPRelay(hyClient *core.Client, listen, remote string, timeout time.Duration,
-	connFunc func(addr net.Addr), errorFunc func(addr net.Addr, err error)) (*UDPRelay, error) {
+	connFunc func(addr net.Addr), errorFunc func(addr net.Addr, err error),
+) (*UDPRelay, error) {
 	uAddr, err := net.ResolveUDPAddr("udp", listen)
 	if err != nil {
 		return nil, err

@@ -4,8 +4,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"net"
 	"strconv"
+
+	"net"
 	"time"
 
 	"github.com/tobyxdd/hysteria/pkg/acl"
@@ -45,7 +46,8 @@ func NewServer(hyClient *core.Client, transport *transport.ClientTransport, addr
 	aclEngine *acl.Engine, disableUDP bool,
 	tcpReqFunc func(addr net.Addr, reqAddr string, action acl.Action, arg string),
 	tcpErrorFunc func(addr net.Addr, reqAddr string, err error),
-	udpAssocFunc func(addr net.Addr), udpErrorFunc func(addr net.Addr, err error)) (*Server, error) {
+	udpAssocFunc func(addr net.Addr), udpErrorFunc func(addr net.Addr, err error),
+) (*Server, error) {
 	tAddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return nil, err
