@@ -69,6 +69,7 @@ func (ct *ClientTransport) quicPacketConn(proto string, server string, obfs obfs
 type PacketDialer interface {
 	ListenPacket() (net.PacketConn, error)
 	Context() context.Context
+	RemoteAddr(host string) (net.Addr, error)
 }
 
 type defaultPacketDialer struct{}
@@ -81,12 +82,16 @@ func (dialer *defaultPacketDialer) Context() context.Context {
 	return context.Background()
 }
 
+func (dialer *defaultPacketDialer) RemoteAddr(host string) (net.Addr, error) {
+	return net.ResolveUDPAddr("udp", host)
+}
+
 func (ct *ClientTransport) QUICDial(proto string, server string, tlsConfig *tls.Config, quicConfig *quic.Config, obfs obfs.Obfuscator, dialer PacketDialer) (quic.Connection, error) {
 	if dialer == nil {
 		dialer = &defaultPacketDialer{}
 	}
 
-	serverUDPAddr, err := net.ResolveUDPAddr("udp", server)
+	serverUDPAddr, err := dialer.RemoteAddr(server)
 	if err != nil {
 		return nil, err
 	}
