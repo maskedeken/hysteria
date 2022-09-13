@@ -7,13 +7,13 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/HyNetwork/hysteria/pkg/conns/faketcp"
+	"github.com/HyNetwork/hysteria/pkg/conns/udp"
+	"github.com/HyNetwork/hysteria/pkg/conns/wechat"
+	obfsPkg "github.com/HyNetwork/hysteria/pkg/obfs"
+	"github.com/HyNetwork/hysteria/pkg/sockopt"
+	"github.com/HyNetwork/hysteria/pkg/utils"
 	"github.com/lucas-clemente/quic-go"
-	"github.com/tobyxdd/hysteria/pkg/conns/faketcp"
-	"github.com/tobyxdd/hysteria/pkg/conns/udp"
-	"github.com/tobyxdd/hysteria/pkg/conns/wechat"
-	"github.com/tobyxdd/hysteria/pkg/obfs"
-	"github.com/tobyxdd/hysteria/pkg/sockopt"
-	"github.com/tobyxdd/hysteria/pkg/utils"
 )
 
 type ServerTransport struct {
@@ -76,7 +76,7 @@ var DefaultServerTransport = &ServerTransport{
 	ResolvePreference: ResolvePreferenceDefault,
 }
 
-func (st *ServerTransport) quicPacketConn(proto string, laddr string, obfs obfs.Obfuscator) (net.PacketConn, error) {
+func (st *ServerTransport) quicPacketConn(proto string, laddr string, obfs obfsPkg.Obfuscator) (net.PacketConn, error) {
 	if len(proto) == 0 || proto == "udp" {
 		laddrU, err := net.ResolveUDPAddr("udp", laddr)
 		if err != nil {
@@ -101,12 +101,10 @@ func (st *ServerTransport) quicPacketConn(proto string, laddr string, obfs obfs.
 		if err != nil {
 			return nil, err
 		}
-		if obfs != nil {
-			oc := wechat.NewObfsWeChatUDPConn(conn, obfs)
-			return oc, nil
-		} else {
-			return conn, nil
+		if obfs == nil {
+			obfs = obfsPkg.NewDummyObfuscator()
 		}
+		return wechat.NewObfsWeChatUDPConn(conn, obfs), nil
 	} else if proto == "faketcp" {
 		conn, err := faketcp.Listen("tcp", laddr)
 		if err != nil {
@@ -123,7 +121,7 @@ func (st *ServerTransport) quicPacketConn(proto string, laddr string, obfs obfs.
 	}
 }
 
-func (st *ServerTransport) QUICListen(proto string, listen string, tlsConfig *tls.Config, quicConfig *quic.Config, obfs obfs.Obfuscator) (quic.Listener, error) {
+func (st *ServerTransport) QUICListen(proto string, listen string, tlsConfig *tls.Config, quicConfig *quic.Config, obfs obfsPkg.Obfuscator) (quic.Listener, error) {
 	pktConn, err := st.quicPacketConn(proto, listen, obfs)
 	if err != nil {
 		return nil, err

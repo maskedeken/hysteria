@@ -11,23 +11,23 @@ import (
 	"os"
 	"time"
 
+	"github.com/HyNetwork/hysteria/pkg/pmtud_fix"
+	"github.com/HyNetwork/hysteria/pkg/redirect"
 	"github.com/oschwald/geoip2-golang"
-	"github.com/tobyxdd/hysteria/pkg/pmtud_fix"
-	"github.com/tobyxdd/hysteria/pkg/redirect"
 	"github.com/yosuke-furukawa/json5/encoding/json5"
 
+	"github.com/HyNetwork/hysteria/pkg/acl"
+	hyCongestion "github.com/HyNetwork/hysteria/pkg/congestion"
+	"github.com/HyNetwork/hysteria/pkg/core"
+	hyHTTP "github.com/HyNetwork/hysteria/pkg/http"
+	"github.com/HyNetwork/hysteria/pkg/obfs"
+	"github.com/HyNetwork/hysteria/pkg/relay"
+	"github.com/HyNetwork/hysteria/pkg/socks5"
+	"github.com/HyNetwork/hysteria/pkg/tproxy"
+	"github.com/HyNetwork/hysteria/pkg/transport"
 	"github.com/lucas-clemente/quic-go"
 	"github.com/lucas-clemente/quic-go/congestion"
 	"github.com/sirupsen/logrus"
-	"github.com/tobyxdd/hysteria/pkg/acl"
-	hyCongestion "github.com/tobyxdd/hysteria/pkg/congestion"
-	"github.com/tobyxdd/hysteria/pkg/core"
-	hyHTTP "github.com/tobyxdd/hysteria/pkg/http"
-	"github.com/tobyxdd/hysteria/pkg/obfs"
-	"github.com/tobyxdd/hysteria/pkg/relay"
-	"github.com/tobyxdd/hysteria/pkg/socks5"
-	"github.com/tobyxdd/hysteria/pkg/tproxy"
-	"github.com/tobyxdd/hysteria/pkg/transport"
 )
 
 func client(config *clientConfig) {
@@ -228,14 +228,19 @@ func client(config *clientConfig) {
 				}
 			}
 			proxy, err := hyHTTP.NewProxyHTTPServer(client, transport.DefaultClientTransport,
-				time.Duration(config.HTTP.Timeout)*time.Second, aclEngine,
+				time.Duration(config.HTTP.Timeout)*time.Second, aclEngine, authFunc,
 				func(reqAddr string, action acl.Action, arg string) {
 					logrus.WithFields(logrus.Fields{
 						"action": actionToString(action, arg),
 						"dst":    defaultIPMasker.Mask(reqAddr),
 					}).Debug("HTTP request")
 				},
-				authFunc)
+				func(reqAddr string, err error) {
+					logrus.WithFields(logrus.Fields{
+						"error": err,
+						"dst":   defaultIPMasker.Mask(reqAddr),
+					}).Info("HTTP error")
+				})
 			if err != nil {
 				logrus.WithField("error", err).Fatal("Failed to initialize HTTP server")
 			}
