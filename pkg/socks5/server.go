@@ -202,7 +202,7 @@ func (s *Server) handleTCP(c *net.TCPConn, r *socks5.Request) error {
 		closeErr = utils.PipePairWithTimeout(c, rc, s.TCPTimeout)
 		return nil
 	case acl.ActionProxy:
-		rc, err := s.HyClient.DialTCP(addr, nil)
+		rc, err := s.HyClient.DialTCP(addr)
 		if err != nil {
 			_ = sendReply(c, socks5.RepHostUnreachable)
 			closeErr = err
@@ -273,7 +273,7 @@ func (s *Server) handleUDP(c *net.TCPConn, r *socks5.Request) error {
 		defer localRelayConn.Close()
 	}
 	// HyClient UDP session
-	hyUDP, err := s.HyClient.DialUDP(nil)
+	hyUDP, err := s.HyClient.DialUDP()
 	if err != nil {
 		_ = sendReply(c, socks5.RepServerFailure)
 		closeErr = err
@@ -317,7 +317,7 @@ func (s *Server) handleUDP(c *net.TCPConn, r *socks5.Request) error {
 	return nil
 }
 
-func (s *Server) udpServer(clientConn *net.UDPConn, localRelayConn *net.UDPConn, hyUDP core.UDPConn) {
+func (s *Server) udpServer(clientConn *net.UDPConn, localRelayConn *net.UDPConn, hyUDP core.HyUDPConn) {
 	var clientAddr *net.UDPAddr
 	buf := make([]byte, udpBufferSize)
 	// Local to remote

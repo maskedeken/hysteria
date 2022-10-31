@@ -59,7 +59,7 @@ func NewProxyHTTPServer(hyClient *core.Client, transport *transport.ClientTransp
 					Zone: ipAddr.Zone,
 				})
 			case acl.ActionProxy:
-				return hyClient.DialTCP(addr, nil)
+				return hyClient.DialTCP(addr)
 			case acl.ActionBlock:
 				return nil, errors.New("blocked by ACL")
 			case acl.ActionHijack:

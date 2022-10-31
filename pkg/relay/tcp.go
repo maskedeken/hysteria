@@ -50,7 +50,7 @@ func (r *TCPRelay) ListenAndServe() error {
 		go func() {
 			defer c.Close()
 			r.ConnFunc(c.RemoteAddr())
-			rc, err := r.HyClient.DialTCP(r.Remote, nil)
+			rc, err := r.HyClient.DialTCP(r.Remote)
 			if err != nil {
 				r.ErrorFunc(c.RemoteAddr(), err)
 				return

@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/HyNetwork/hysteria/pkg/congestion"
+
 	"github.com/HyNetwork/hysteria/pkg/acl"
-	"github.com/HyNetwork/hysteria/pkg/obfs"
-	"github.com/HyNetwork/hysteria/pkg/pmtud_fix"
+	"github.com/HyNetwork/hysteria/pkg/pmtud"
 	"github.com/HyNetwork/hysteria/pkg/transport"
 	"github.com/lucas-clemente/quic-go"
 	"github.com/lunixbochs/struc"
@@ -26,11 +27,10 @@ type (
 )
 
 type Server struct {
-	transport         *transport.ServerTransport
-	sendBPS, recvBPS  uint64
-	congestionFactory CongestionFactory
-	disableUDP        bool
-	aclEngine         *acl.Engine
+	transport        *transport.ServerTransport
+	sendBPS, recvBPS uint64
+	disableUDP       bool
+	aclEngine        *acl.Engine
 
 	connectFunc    ConnectFunc
 	disconnectFunc DisconnectFunc
@@ -42,34 +42,37 @@ type Server struct {
 	upCounterVec, downCounterVec *prometheus.CounterVec
 	connGaugeVec                 *prometheus.GaugeVec
 
+	pktConn  net.PacketConn
 	listener quic.Listener
 }
 
-func NewServer(addr string, protocol string, tlsConfig *tls.Config, quicConfig *quic.Config, transport *transport.ServerTransport,
-	sendBPS uint64, recvBPS uint64, congestionFactory CongestionFactory, disableUDP bool, aclEngine *acl.Engine,
-	obfuscator obfs.Obfuscator, connectFunc ConnectFunc, disconnectFunc DisconnectFunc,
+func NewServer(tlsConfig *tls.Config, quicConfig *quic.Config,
+	pktConn net.PacketConn, transport *transport.ServerTransport,
+	sendBPS uint64, recvBPS uint64, disableUDP bool, aclEngine *acl.Engine,
+	connectFunc ConnectFunc, disconnectFunc DisconnectFunc,
 	tcpRequestFunc TCPRequestFunc, tcpErrorFunc TCPErrorFunc,
 	udpRequestFunc UDPRequestFunc, udpErrorFunc UDPErrorFunc, promRegistry *prometheus.Registry,
 ) (*Server, error) {
-	quicConfig.DisablePathMTUDiscovery = quicConfig.DisablePathMTUDiscovery || pmtud_fix.DisablePathMTUDiscovery
-	listener, err := transport.QUICListen(protocol, addr, tlsConfig, quicConfig, obfuscator)
+	quicConfig.DisablePathMTUDiscovery = quicConfig.DisablePathMTUDiscovery || pmtud.DisablePathMTUDiscovery
+	listener, err := quic.Listen(pktConn, tlsConfig, quicConfig)
 	if err != nil {
+		_ = pktConn.Close()
 		return nil, err
 	}
 	s := &Server{
-		listener:          listener,
-		transport:         transport,
-		sendBPS:           sendBPS,
-		recvBPS:           recvBPS,
-		congestionFactory: congestionFactory,
-		disableUDP:        disableUDP,
-		aclEngine:         aclEngine,
-		connectFunc:       connectFunc,
-		disconnectFunc:    disconnectFunc,
-		tcpRequestFunc:    tcpRequestFunc,
-		tcpErrorFunc:      tcpErrorFunc,
-		udpRequestFunc:    udpRequestFunc,
-		udpErrorFunc:      udpErrorFunc,
+		pktConn:        pktConn,
+		listener:       listener,
+		transport:      transport,
+		sendBPS:        sendBPS,
+		recvBPS:        recvBPS,
+		disableUDP:     disableUDP,
+		aclEngine:      aclEngine,
+		connectFunc:    connectFunc,
+		disconnectFunc: disconnectFunc,
+		tcpRequestFunc: tcpRequestFunc,
+		tcpErrorFunc:   tcpErrorFunc,
+		udpRequestFunc: udpRequestFunc,
+		udpErrorFunc:   udpErrorFunc,
 	}
 	if promRegistry != nil {
 		s.upCounterVec = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -88,67 +91,68 @@ func NewServer(addr string, protocol string, tlsConfig *tls.Config, quicConfig *
 
 func (s *Server) Serve() error {
 	for {
-		cs, err := s.listener.Accept(context.Background())
+		cc, err := s.listener.Accept(context.Background())
 		if err != nil {
 			return err
 		}
-		go s.handleClient(cs)
+		go s.handleClient(cc)
 	}
 }
 
 func (s *Server) Close() error {
-	return s.listener.Close()
+	err := s.listener.Close()
+	_ = s.pktConn.Close()
+	return err
 }
 
-func (s *Server) handleClient(cs quic.Connection) {
+func (s *Server) handleClient(cc quic.Connection) {
 	// Expect the client to create a control stream to send its own information
 	ctx, ctxCancel := context.WithTimeout(context.Background(), protocolTimeout)
-	stream, err := cs.AcceptStream(ctx)
+	stream, err := cc.AcceptStream(ctx)
 	ctxCancel()
 	if err != nil {
-		_ = cs.CloseWithError(closeErrorCodeProtocol, "protocol error")
+		_ = qErrorProtocol.Send(cc)
 		return
 	}
 	// Handle the control stream
-	auth, ok, v2, err := s.handleControlStream(cs, stream)
+	auth, ok, err := s.handleControlStream(cc, stream)
 	if err != nil {
-		_ = cs.CloseWithError(closeErrorCodeProtocol, "protocol error")
+		_ = qErrorProtocol.Send(cc)
 		return
 	}
 	if !ok {
-		_ = cs.CloseWithError(closeErrorCodeAuth, "auth error")
+		_ = qErrorAuth.Send(cc)
 		return
 	}
 	// Start accepting streams and messages
-	sc := newServerClient(v2, cs, s.transport, auth, s.disableUDP, s.aclEngine,
+	sc := newServerClient(cc, s.transport, auth, s.disableUDP, s.aclEngine,
 		s.tcpRequestFunc, s.tcpErrorFunc, s.udpRequestFunc, s.udpErrorFunc,
 		s.upCounterVec, s.downCounterVec, s.connGaugeVec)
 	err = sc.Run()
-	_ = cs.CloseWithError(closeErrorCodeGeneric, "")
-	s.disconnectFunc(cs.RemoteAddr(), auth, err)
+	_ = qErrorGeneric.Send(cc)
+	s.disconnectFunc(cc.RemoteAddr(), auth, err)
 }
 
 // Auth & negotiate speed
-func (s *Server) handleControlStream(cs quic.Connection, stream quic.Stream) ([]byte, bool, bool, error) {
+func (s *Server) handleControlStream(cc quic.Connection, stream quic.Stream) ([]byte, bool, error) {
 	// Check version
 	vb := make([]byte, 1)
 	_, err := stream.Read(vb)
 	if err != nil {
-		return nil, false, false, err
+		return nil, false, err
 	}
-	if vb[0] != protocolVersion && vb[0] != protocolVersionV2 {
-		return nil, false, false, fmt.Errorf("unsupported protocol version %d, expecting %d/%d",
-			vb[0], protocolVersionV2, protocolVersion)
+	if vb[0] != protocolVersion {
+		return nil, false, fmt.Errorf("unsupported protocol version %d, expecting %d", vb[0], protocolVersion)
 	}
 	// Parse client hello
 	var ch clientHello
 	err = struc.Unpack(stream, &ch)
 	if err != nil {
-		return nil, false, false, err
+		return nil, false, err
 	}
 	// Speed
 	if ch.Rate.SendBPS == 0 || ch.Rate.RecvBPS == 0 {
-		return nil, false, false, errors.New("invalid rate from client")
+		return nil, false, errors.New("invalid rate from client")
 	}
 	serverSendBPS, serverRecvBPS := ch.Rate.RecvBPS, ch.Rate.SendBPS
 	if s.sendBPS > 0 && serverSendBPS > s.sendBPS {
@@ -158,22 +162,22 @@ func (s *Server) handleControlStream(cs quic.Connection, stream quic.Stream) ([]
 		serverRecvBPS = s.recvBPS
 	}
 	// Auth
-	ok, msg := s.connectFunc(cs.RemoteAddr(), ch.Auth, serverSendBPS, serverRecvBPS)
+	ok, msg := s.connectFunc(cc.RemoteAddr(), ch.Auth, serverSendBPS, serverRecvBPS)
 	// Response
 	err = struc.Pack(stream, &serverHello{
 		OK: ok,
-		Rate: transmissionRate{
+		Rate: maxRate{
 			SendBPS: serverSendBPS,
 			RecvBPS: serverRecvBPS,
 		},
 		Message: msg,
 	})
 	if err != nil {
-		return nil, false, false, err
+		return nil, false, err
 	}
 	// Set the congestion accordingly
-	if ok && s.congestionFactory != nil {
-		cs.SetCongestionControl(s.congestionFactory(serverSendBPS))
+	if ok {
+		cc.SetCongestionControl(congestion.NewBrutalSender(serverSendBPS))
 	}
-	return ch.Auth, ok, vb[0] == protocolVersionV2, nil
+	return ch.Auth, ok, nil
 }

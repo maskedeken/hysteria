@@ -23,7 +23,9 @@ const (
 
 	DefaultMMDBFilename = "GeoLite2-Country.mmdb"
 
-	KeepAlivePeriod = 10 * time.Second
+	ServerMaxIdleTimeout         = 60 * time.Second
+	DefaultClientMaxIdleTimeout  = 20 * time.Second
+	DefaultClientKeepAlivePeriod = 8 * time.Second
 )
 
 var rateStringRegexp = regexp.MustCompile(`^(\d+)\s*([KMGT]?)([Bb])ps$`)
@@ -131,23 +133,26 @@ func (r *Relay) Check() error {
 	if len(r.Remote) == 0 {
 		return errors.New("no relay remote address")
 	}
-	if r.Timeout != 0 && r.Timeout <= 4 {
+	if r.Timeout != 0 && r.Timeout < 4 {
 		return errors.New("invalid relay timeout")
 	}
 	return nil
 }
 
 type clientConfig struct {
-	Server        string `json:"server"`
-	Protocol      string `json:"protocol"`
-	Up            string `json:"up"`
-	UpMbps        int    `json:"up_mbps"`
-	Down          string `json:"down"`
-	DownMbps      int    `json:"down_mbps"`
-	Retry         int    `json:"retry"`
-	RetryInterval int    `json:"retry_interval"`
+	Server   string `json:"server"`
+	Protocol string `json:"protocol"`
+	Up       string `json:"up"`
+	UpMbps   int    `json:"up_mbps"`
+	Down     string `json:"down"`
+	DownMbps int    `json:"down_mbps"`
 	// Optional below
-	SOCKS5 struct {
+	Retry            int  `json:"retry"`
+	RetryInterval    int  `json:"retry_interval"`
+	QuitOnDisconnect bool `json:"quit_on_disconnect"`
+	HandshakeTimeout int  `json:"handshake_timeout"`
+	IdleTimeout      int  `json:"idle_timeout"`
+	SOCKS5           struct {
 		Listen     string `json:"listen"`
 		Timeout    int    `json:"timeout"`
 		DisableUDP bool   `json:"disable_udp"`
@@ -231,10 +236,16 @@ func (c *clientConfig) Check() error {
 		len(c.TCPRedirect.Listen) == 0 {
 		return errors.New("please enable at least one mode")
 	}
-	if c.SOCKS5.Timeout != 0 && c.SOCKS5.Timeout <= 4 {
+	if c.HandshakeTimeout != 0 && c.HandshakeTimeout < 2 {
+		return errors.New("invalid handshake timeout")
+	}
+	if c.IdleTimeout != 0 && c.IdleTimeout < 4 {
+		return errors.New("invalid idle timeout")
+	}
+	if c.SOCKS5.Timeout != 0 && c.SOCKS5.Timeout < 4 {
 		return errors.New("invalid SOCKS5 timeout")
 	}
-	if c.HTTP.Timeout != 0 && c.HTTP.Timeout <= 4 {
+	if c.HTTP.Timeout != 0 && c.HTTP.Timeout < 4 {
 		return errors.New("invalid HTTP timeout")
 	}
 	if c.TUN.Timeout != 0 && c.TUN.Timeout < 4 {
@@ -246,10 +257,10 @@ func (c *clientConfig) Check() error {
 	if len(c.UDPRelay.Listen) > 0 && len(c.UDPRelay.Remote) == 0 {
 		return errors.New("no UDP relay remote address")
 	}
-	if c.TCPRelay.Timeout != 0 && c.TCPRelay.Timeout <= 4 {
+	if c.TCPRelay.Timeout != 0 && c.TCPRelay.Timeout < 4 {
 		return errors.New("invalid TCP relay timeout")
 	}
-	if c.UDPRelay.Timeout != 0 && c.UDPRelay.Timeout <= 4 {
+	if c.UDPRelay.Timeout != 0 && c.UDPRelay.Timeout < 4 {
 		return errors.New("invalid UDP relay timeout")
 	}
 	for _, r := range c.TCPRelays {
@@ -262,13 +273,13 @@ func (c *clientConfig) Check() error {
 			return err
 		}
 	}
-	if c.TCPTProxy.Timeout != 0 && c.TCPTProxy.Timeout <= 4 {
+	if c.TCPTProxy.Timeout != 0 && c.TCPTProxy.Timeout < 4 {
 		return errors.New("invalid TCP TProxy timeout")
 	}
-	if c.UDPTProxy.Timeout != 0 && c.UDPTProxy.Timeout <= 4 {
+	if c.UDPTProxy.Timeout != 0 && c.UDPTProxy.Timeout < 4 {
 		return errors.New("invalid UDP TProxy timeout")
 	}
-	if c.TCPRedirect.Timeout != 0 && c.TCPRedirect.Timeout <= 4 {
+	if c.TCPRedirect.Timeout != 0 && c.TCPRedirect.Timeout < 4 {
 		return errors.New("invalid TCP Redirect timeout")
 	}
 	if len(c.Server) == 0 {

@@ -2,28 +2,34 @@ package main
 
 import (
 	"crypto/tls"
-	"errors"
 	"io"
 	"net"
 	"net/http"
 	"time"
 
+	"github.com/HyNetwork/hysteria/pkg/transport/pktconns"
+
 	"github.com/HyNetwork/hysteria/cmd/auth"
 	"github.com/HyNetwork/hysteria/pkg/acl"
-	hyCongestion "github.com/HyNetwork/hysteria/pkg/congestion"
 	"github.com/HyNetwork/hysteria/pkg/core"
-	"github.com/HyNetwork/hysteria/pkg/obfs"
-	"github.com/HyNetwork/hysteria/pkg/pmtud_fix"
+	"github.com/HyNetwork/hysteria/pkg/pmtud"
 	"github.com/HyNetwork/hysteria/pkg/sockopt"
 	"github.com/HyNetwork/hysteria/pkg/transport"
 	"github.com/lucas-clemente/quic-go"
-	"github.com/lucas-clemente/quic-go/congestion"
 	"github.com/oschwald/geoip2-golang"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 	"github.com/yosuke-furukawa/json5/encoding/json5"
 )
+
+var serverPacketConnFuncFactoryMap = map[string]pktconns.ServerPacketConnFuncFactory{
+	"":             pktconns.NewServerUDPConnFunc,
+	"udp":          pktconns.NewServerUDPConnFunc,
+	"wechat":       pktconns.NewServerWeChatConnFunc,
+	"wechat-video": pktconns.NewServerWeChatConnFunc,
+	"faketcp":      pktconns.NewServerFakeTCPConnFunc,
+}
 
 func server(config *serverConfig) {
 	logrus.WithField("config", config.String()).Info("Server configuration loaded")
@@ -77,7 +83,8 @@ func server(config *serverConfig) {
 		InitialConnectionReceiveWindow: config.ReceiveWindowClient,
 		MaxConnectionReceiveWindow:     config.ReceiveWindowClient,
 		MaxIncomingStreams:             int64(config.MaxConnClient),
-		KeepAlivePeriod:                KeepAlivePeriod,
+		MaxIdleTimeout:                 ServerMaxIdleTimeout,
+		KeepAlivePeriod:                0, // Keep alive should solely be client's responsibility
 		DisablePathMTUDiscovery:        config.DisableMTUDiscovery,
 		EnableDatagrams:                true,
 	}
@@ -92,7 +99,7 @@ func server(config *serverConfig) {
 	if quicConfig.MaxIncomingStreams == 0 {
 		quicConfig.MaxIncomingStreams = DefaultMaxIncomingStreams
 	}
-	if !quicConfig.DisablePathMTUDiscovery && pmtud_fix.DisablePathMTUDiscovery {
+	if !quicConfig.DisablePathMTUDiscovery && pmtud.DisablePathMTUDiscovery {
 		logrus.Info("Path MTU Discovery is not yet supported on this platform")
 	}
 	// Auth
@@ -108,7 +115,7 @@ func server(config *serverConfig) {
 			return true, "Welcome"
 		}
 	case "password", "passwords":
-		authFunc, err = passwordAuthFunc(config.Auth.Config)
+		authFunc, err = auth.PasswordAuthFunc(config.Auth.Config)
 		if err != nil {
 			logrus.WithFields(logrus.Fields{
 				"error": err,
@@ -117,7 +124,7 @@ func server(config *serverConfig) {
 			logrus.Info("Password authentication enabled")
 		}
 	case "external":
-		authFunc, err = externalAuthFunc(config.Auth.Config)
+		authFunc, err = auth.ExternalAuthFunc(config.Auth.Config)
 		if err != nil {
 			logrus.WithFields(logrus.Fields{
 				"error": err,
@@ -141,11 +148,6 @@ func server(config *serverConfig) {
 			}).Info("Client connected")
 		}
 		return ok, msg
-	}
-	// Obfuscator
-	var obfuscator obfs.Obfuscator
-	if len(config.Obfs) > 0 {
-		obfuscator = obfs.NewXPlusObfuscator([]byte(config.Obfs))
 	}
 	// Resolve preference
 	if len(config.ResolvePreference) > 0 {
@@ -211,7 +213,7 @@ func server(config *serverConfig) {
 		}
 		aclEngine.DefaultAction = acl.ActionDirect
 	}
-	// Server
+	// Prometheus
 	var promReg *prometheus.Registry
 	if len(config.PrometheusListen) > 0 {
 		promReg = prometheus.NewRegistry()
@@ -221,13 +223,24 @@ func server(config *serverConfig) {
 			logrus.WithField("error", err).Fatal("Prometheus HTTP server error")
 		}()
 	}
+	// Packet conn
+	pktConnFuncFactory := serverPacketConnFuncFactoryMap[config.Protocol]
+	if pktConnFuncFactory == nil {
+		logrus.WithField("protocol", config.Protocol).Fatal("Unsupported protocol")
+	}
+	pktConnFunc := pktConnFuncFactory(config.Obfs)
+	pktConn, err := pktConnFunc(config.Listen)
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"error": err,
+			"addr":  config.Listen,
+		}).Fatal("Failed to listen on the UDP address")
+	}
+	// Server
 	up, down, _ := config.Speed()
-	server, err := core.NewServer(config.Listen, config.Protocol, tlsConfig, quicConfig, transport.DefaultServerTransport,
-		up, down,
-		func(refBPS uint64) congestion.CongestionControl {
-			return hyCongestion.NewBrutalSender(congestion.ByteCount(refBPS))
-		}, config.DisableUDP, aclEngine, obfuscator, connectFunc, disconnectFunc,
-		tcpRequestFunc, tcpErrorFunc, udpRequestFunc, udpErrorFunc, promReg)
+	server, err := core.NewServer(tlsConfig, quicConfig, pktConn,
+		transport.DefaultServerTransport, up, down, config.DisableUDP, aclEngine,
+		connectFunc, disconnectFunc, tcpRequestFunc, tcpErrorFunc, udpRequestFunc, udpErrorFunc, promReg)
 	if err != nil {
 		logrus.WithField("error", err).Fatal("Failed to initialize server")
 	}
@@ -236,54 +249,6 @@ func server(config *serverConfig) {
 
 	err = server.Serve()
 	logrus.WithField("error", err).Fatal("Server shutdown")
-}
-
-func passwordAuthFunc(rawMsg json5.RawMessage) (core.ConnectFunc, error) {
-	var pwds []string
-	err := json5.Unmarshal(rawMsg, &pwds)
-	if err != nil {
-		// not a string list, legacy format?
-		var pwdConfig map[string]string
-		err = json5.Unmarshal(rawMsg, &pwdConfig)
-		if err != nil || len(pwdConfig["password"]) == 0 {
-			// still no, invalid config
-			return nil, errors.New("invalid config")
-		}
-		// yes it is
-		pwds = []string{pwdConfig["password"]}
-	}
-	return func(addr net.Addr, auth []byte, sSend uint64, sRecv uint64) (bool, string) {
-		for _, pwd := range pwds {
-			if string(auth) == pwd {
-				return true, "Welcome"
-			}
-		}
-		return false, "Wrong password"
-	}, nil
-}
-
-func externalAuthFunc(rawMsg json5.RawMessage) (core.ConnectFunc, error) {
-	var extConfig map[string]string
-	err := json5.Unmarshal(rawMsg, &extConfig)
-	if err != nil {
-		return nil, errors.New("invalid config")
-	}
-	if len(extConfig["http"]) != 0 {
-		hp := &auth.HTTPAuthProvider{
-			Client: &http.Client{
-				Timeout: 10 * time.Second,
-			},
-			URL: extConfig["http"],
-		}
-		return hp.Auth, nil
-	} else if len(extConfig["cmd"]) != 0 {
-		cp := &auth.CmdAuthProvider{
-			Cmd: extConfig["cmd"],
-		}
-		return cp.Auth, nil
-	} else {
-		return nil, errors.New("invalid config")
-	}
 }
 
 func disconnectFunc(addr net.Addr, auth []byte, err error) {

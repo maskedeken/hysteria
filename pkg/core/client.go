@@ -12,90 +12,112 @@ import (
 	"sync"
 	"time"
 
-	"github.com/HyNetwork/hysteria/pkg/obfs"
-	"github.com/HyNetwork/hysteria/pkg/pmtud_fix"
-	"github.com/HyNetwork/hysteria/pkg/transport"
+	"github.com/HyNetwork/hysteria/pkg/transport/pktconns"
+
+	"github.com/HyNetwork/hysteria/pkg/congestion"
+
+	"github.com/HyNetwork/hysteria/pkg/pmtud"
 	"github.com/HyNetwork/hysteria/pkg/utils"
 	"github.com/lucas-clemente/quic-go"
-	"github.com/lucas-clemente/quic-go/congestion"
 	"github.com/lunixbochs/struc"
 )
 
 var ErrClosed = errors.New("closed")
 
-type CongestionFactory func(refBPS uint64) congestion.CongestionControl
-
 type Client struct {
-	transport         *transport.ClientTransport
-	serverAddr        string
-	protocol          string
-	sendBPS, recvBPS  uint64
-	auth              []byte
-	congestionFactory CongestionFactory
-	obfuscator        obfs.Obfuscator
+	serverAddr       string
+	sendBPS, recvBPS uint64
+	auth             []byte
 
 	tlsConfig  *tls.Config
 	quicConfig *quic.Config
 
-	quicSession    quic.Connection
+	pktConnFunc pktconns.ClientPacketConnFunc
+
 	reconnectMutex sync.Mutex
+	pktConn        net.PacketConn
+	quicConn       quic.Connection
 	closed         bool
 
 	udpSessionMutex sync.RWMutex
 	udpSessionMap   map[uint32]chan *udpMessage
 	udpDefragger    defragger
+
+	quicReconnectFunc func(err error)
 }
 
-func NewClient(serverAddr string, protocol string, auth []byte, tlsConfig *tls.Config, quicConfig *quic.Config,
-	transport *transport.ClientTransport, sendBPS uint64, recvBPS uint64, congestionFactory CongestionFactory,
-	obfuscator obfs.Obfuscator,
+func NewClient(serverAddr string, auth []byte, tlsConfig *tls.Config, quicConfig *quic.Config,
+	pktConnFunc pktconns.ClientPacketConnFunc, sendBPS uint64, recvBPS uint64, quicReconnectFunc func(err error),
 ) (*Client, error) {
-	quicConfig.DisablePathMTUDiscovery = quicConfig.DisablePathMTUDiscovery || pmtud_fix.DisablePathMTUDiscovery
+	quicConfig.DisablePathMTUDiscovery = quicConfig.DisablePathMTUDiscovery || pmtud.DisablePathMTUDiscovery
 	c := &Client{
-		transport:         transport,
 		serverAddr:        serverAddr,
-		protocol:          protocol,
 		sendBPS:           sendBPS,
 		recvBPS:           recvBPS,
 		auth:              auth,
-		congestionFactory: congestionFactory,
-		obfuscator:        obfuscator,
 		tlsConfig:         tlsConfig,
 		quicConfig:        quicConfig,
+		pktConnFunc:       pktConnFunc,
+		quicReconnectFunc: quicReconnectFunc,
+	}
+	if err := c.connect(); err != nil {
+		return nil, err
 	}
 	return c, nil
 }
 
-func (c *Client) connectToServer(dialer transport.PacketDialer) error {
-	qs, err := c.transport.QUICDial(c.protocol, c.serverAddr, c.tlsConfig, c.quicConfig, c.obfuscator, dialer)
+func (c *Client) connect() error {
+	// Clear previous connection
+	if c.quicConn != nil {
+		_ = c.quicConn.CloseWithError(0, "")
+	}
+	if c.pktConn != nil {
+		_ = c.pktConn.Close()
+	}
+	// New connection
+	pktConn, err := c.pktConnFunc(c.serverAddr)
 	if err != nil {
+		return err
+	}
+	serverUDPAddr, err := net.ResolveUDPAddr("udp", c.serverAddr)
+	if err != nil {
+		_ = pktConn.Close()
+		return err
+	}
+	quicConn, err := quic.Dial(pktConn, serverUDPAddr, c.serverAddr, c.tlsConfig, c.quicConfig)
+	if err != nil {
+		_ = pktConn.Close()
 		return err
 	}
 	// Control stream
 	ctx, ctxCancel := context.WithTimeout(context.Background(), protocolTimeout)
-	stream, err := qs.OpenStreamSync(ctx)
+	stream, err := quicConn.OpenStreamSync(ctx)
 	ctxCancel()
 	if err != nil {
-		_ = qs.CloseWithError(closeErrorCodeProtocol, "protocol error")
+		_ = qErrorProtocol.Send(quicConn)
+		_ = pktConn.Close()
 		return err
 	}
-	ok, msg, err := c.handleControlStream(qs, stream)
+	ok, msg, err := c.handleControlStream(quicConn, stream)
 	if err != nil {
-		_ = qs.CloseWithError(closeErrorCodeProtocol, "protocol error")
+		_ = qErrorProtocol.Send(quicConn)
+		_ = pktConn.Close()
 		return err
 	}
 	if !ok {
-		_ = qs.CloseWithError(closeErrorCodeAuth, "auth error")
+		_ = qErrorAuth.Send(quicConn)
+		_ = pktConn.Close()
 		return fmt.Errorf("auth error: %s", msg)
 	}
 	// All good
 	c.udpSessionMap = make(map[uint32]chan *udpMessage)
-	go c.handleMessage(qs)
-	c.quicSession = qs
+	go c.handleMessage(quicConn)
+	c.pktConn = pktConn
+	c.quicConn = quicConn
 	return nil
 }
 
-func (c *Client) handleControlStream(qs quic.Connection, stream quic.Stream) (bool, string, error) {
+func (c *Client) handleControlStream(qc quic.Connection, stream quic.Stream) (bool, string, error) {
 	// Send protocol version
 	_, err := stream.Write([]byte{protocolVersion})
 	if err != nil {
@@ -103,7 +125,7 @@ func (c *Client) handleControlStream(qs quic.Connection, stream quic.Stream) (bo
 	}
 	// Send client hello
 	err = struc.Pack(stream, &clientHello{
-		Rate: transmissionRate{
+		Rate: maxRate{
 			SendBPS: c.sendBPS,
 			RecvBPS: c.recvBPS,
 		},
@@ -119,15 +141,15 @@ func (c *Client) handleControlStream(qs quic.Connection, stream quic.Stream) (bo
 		return false, "", err
 	}
 	// Set the congestion accordingly
-	if sh.OK && c.congestionFactory != nil {
-		qs.SetCongestionControl(c.congestionFactory(sh.Rate.RecvBPS))
+	if sh.OK {
+		qc.SetCongestionControl(congestion.NewBrutalSender(sh.Rate.RecvBPS))
 	}
 	return sh.OK, sh.Message, nil
 }
 
-func (c *Client) handleMessage(qs quic.Connection) {
+func (c *Client) handleMessage(qc quic.Connection) {
 	for {
-		msg, err := qs.ReceiveMessage()
+		msg, err := qc.ReceiveMessage()
 		if err != nil {
 			break
 		}
@@ -154,44 +176,39 @@ func (c *Client) handleMessage(qs quic.Connection) {
 	}
 }
 
-func (c *Client) openStreamWithReconnect(dialer transport.PacketDialer) (quic.Connection, quic.Stream, error) {
+func (c *Client) openStreamWithReconnect() (quic.Connection, quic.Stream, error) {
 	c.reconnectMutex.Lock()
 	defer c.reconnectMutex.Unlock()
 	if c.closed {
 		return nil, nil, ErrClosed
 	}
-	if c.quicSession == nil {
-		if err := c.connectToServer(dialer); err != nil {
-			// Still error, oops
-			return nil, nil, err
-		}
-	}
-	stream, err := c.quicSession.OpenStream()
+	stream, err := c.quicConn.OpenStream()
 	if err == nil {
 		// All good
-		return c.quicSession, &wrappedQUICStream{stream}, nil
+		return c.quicConn, &qStream{stream}, nil
 	}
 	// Something is wrong
 	if nErr, ok := err.(net.Error); ok && nErr.Temporary() {
 		// Temporary error, just return
 		return nil, nil, err
 	}
+	c.quicReconnectFunc(err)
 	// Permanent error, need to reconnect
-	if err := c.connectToServer(dialer); err != nil {
+	if err := c.connect(); err != nil {
 		// Still error, oops
 		return nil, nil, err
 	}
 	// We are not going to try again even if it still fails the second time
-	stream, err = c.quicSession.OpenStream()
-	return c.quicSession, &wrappedQUICStream{stream}, err
+	stream, err = c.quicConn.OpenStream()
+	return c.quicConn, &qStream{stream}, err
 }
 
-func (c *Client) DialTCP(addr string, dialer transport.PacketDialer) (net.Conn, error) {
+func (c *Client) DialTCP(addr string) (net.Conn, error) {
 	host, port, err := utils.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
 	}
-	session, stream, err := c.openStreamWithReconnect(dialer)
+	session, stream, err := c.openStreamWithReconnect()
 	if err != nil {
 		return nil, err
 	}
@@ -216,15 +233,15 @@ func (c *Client) DialTCP(addr string, dialer transport.PacketDialer) (net.Conn, 
 		_ = stream.Close()
 		return nil, fmt.Errorf("connection rejected: %s", sr.Message)
 	}
-	return &quicConn{
+	return &hyTCPConn{
 		Orig:             stream,
 		PseudoLocalAddr:  session.LocalAddr(),
 		PseudoRemoteAddr: session.RemoteAddr(),
 	}, nil
 }
 
-func (c *Client) DialUDP(dialer transport.PacketDialer) (UDPConn, error) {
-	session, stream, err := c.openStreamWithReconnect(dialer)
+func (c *Client) DialUDP() (HyUDPConn, error) {
+	session, stream, err := c.openStreamWithReconnect()
 	if err != nil {
 		return nil, err
 	}
@@ -252,13 +269,13 @@ func (c *Client) DialUDP(dialer transport.PacketDialer) (UDPConn, error) {
 	c.udpSessionMutex.Lock()
 	nCh := make(chan *udpMessage, 1024)
 	// Store the current session map for CloseFunc below
-	// to ensures that we are adding and removing sessions on the same map,
+	// to ensure that we are adding and removing sessions on the same map,
 	// as reconnecting will reassign the map
 	sessionMap := c.udpSessionMap
 	sessionMap[sr.UDPSessionID] = nCh
 	c.udpSessionMutex.Unlock()
 
-	pktConn := &quicPktConn{
+	pktConn := &hyUDPConn{
 		Session: session,
 		Stream:  stream,
 		CloseFunc: func() {
@@ -279,60 +296,58 @@ func (c *Client) DialUDP(dialer transport.PacketDialer) (UDPConn, error) {
 func (c *Client) Close() error {
 	c.reconnectMutex.Lock()
 	defer c.reconnectMutex.Unlock()
-	err := c.quicSession.CloseWithError(closeErrorCodeGeneric, "")
+	err := qErrorGeneric.Send(c.quicConn)
+	_ = c.pktConn.Close()
 	c.closed = true
 	return err
 }
 
-type quicConn struct {
+// hyTCPConn wraps a QUIC stream and implements net.Conn returned by Client.DialTCP
+type hyTCPConn struct {
 	Orig             quic.Stream
 	PseudoLocalAddr  net.Addr
 	PseudoRemoteAddr net.Addr
 }
 
-func (w *quicConn) Read(b []byte) (n int, err error) {
+func (w *hyTCPConn) Read(b []byte) (n int, err error) {
 	return w.Orig.Read(b)
 }
 
-func (w *quicConn) Write(b []byte) (n int, err error) {
+func (w *hyTCPConn) Write(b []byte) (n int, err error) {
 	return w.Orig.Write(b)
 }
 
-func (w *quicConn) Close() error {
+func (w *hyTCPConn) Close() error {
 	return w.Orig.Close()
 }
 
-func (w *quicConn) LocalAddr() net.Addr {
+func (w *hyTCPConn) LocalAddr() net.Addr {
 	return w.PseudoLocalAddr
 }
 
-func (w *quicConn) RemoteAddr() net.Addr {
+func (w *hyTCPConn) RemoteAddr() net.Addr {
 	return w.PseudoRemoteAddr
 }
 
-func (w *quicConn) SetDeadline(t time.Time) error {
+func (w *hyTCPConn) SetDeadline(t time.Time) error {
 	return w.Orig.SetDeadline(t)
 }
 
-func (w *quicConn) SetReadDeadline(t time.Time) error {
+func (w *hyTCPConn) SetReadDeadline(t time.Time) error {
 	return w.Orig.SetReadDeadline(t)
 }
 
-func (w *quicConn) SetWriteDeadline(t time.Time) error {
+func (w *hyTCPConn) SetWriteDeadline(t time.Time) error {
 	return w.Orig.SetWriteDeadline(t)
 }
 
-type UDPConn interface {
+type HyUDPConn interface {
 	ReadFrom() ([]byte, string, error)
 	WriteTo([]byte, string) error
 	Close() error
-	LocalAddr() net.Addr
-	SetDeadline(t time.Time) error
-	SetReadDeadline(t time.Time) error
-	SetWriteDeadline(t time.Time) error
 }
 
-type quicPktConn struct {
+type hyUDPConn struct {
 	Session      quic.Connection
 	Stream       quic.Stream
 	CloseFunc    func()
@@ -340,7 +355,7 @@ type quicPktConn struct {
 	MsgCh        <-chan *udpMessage
 }
 
-func (c *quicPktConn) Hold() {
+func (c *hyUDPConn) Hold() {
 	// Hold the stream until it's closed
 	buf := make([]byte, 1024)
 	for {
@@ -352,7 +367,7 @@ func (c *quicPktConn) Hold() {
 	_ = c.Close()
 }
 
-func (c *quicPktConn) ReadFrom() ([]byte, string, error) {
+func (c *hyUDPConn) ReadFrom() ([]byte, string, error) {
 	msg := <-c.MsgCh
 	if msg == nil {
 		// Closed
@@ -361,7 +376,7 @@ func (c *quicPktConn) ReadFrom() ([]byte, string, error) {
 	return msg.Data, net.JoinHostPort(msg.Host, strconv.Itoa(int(msg.Port))), nil
 }
 
-func (c *quicPktConn) WriteTo(p []byte, addr string) error {
+func (c *hyUDPConn) WriteTo(p []byte, addr string) error {
 	host, port, err := utils.SplitHostPort(addr)
 	if err != nil {
 		return err
@@ -400,23 +415,7 @@ func (c *quicPktConn) WriteTo(p []byte, addr string) error {
 	}
 }
 
-func (c *quicPktConn) Close() error {
+func (c *hyUDPConn) Close() error {
 	c.CloseFunc()
 	return c.Stream.Close()
-}
-
-func (c *quicPktConn) LocalAddr() net.Addr {
-	return c.Session.LocalAddr()
-}
-
-func (c *quicPktConn) SetDeadline(t time.Time) error {
-	return c.Stream.SetDeadline(t)
-}
-
-func (c *quicPktConn) SetReadDeadline(t time.Time) error {
-	return c.Stream.SetReadDeadline(t)
-}
-
-func (c *quicPktConn) SetWriteDeadline(t time.Time) error {
-	return c.Stream.SetWriteDeadline(t)
 }

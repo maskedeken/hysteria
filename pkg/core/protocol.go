@@ -2,32 +2,44 @@ package core
 
 import (
 	"time"
+
+	"github.com/lucas-clemente/quic-go"
 )
 
 const (
-	protocolVersion   = uint8(3)
-	protocolVersionV2 = uint8(2)
-	protocolTimeout   = 10 * time.Second
-
-	closeErrorCodeGeneric  = 0
-	closeErrorCodeProtocol = 1
-	closeErrorCodeAuth     = 2
+	protocolVersion = uint8(3)
+	protocolTimeout = 10 * time.Second
 )
 
-type transmissionRate struct {
+type qError struct {
+	Code quic.ApplicationErrorCode
+	Msg  string
+}
+
+func (e qError) Send(c quic.Connection) error {
+	return c.CloseWithError(e.Code, e.Msg)
+}
+
+var (
+	qErrorGeneric  = qError{0, ""}
+	qErrorProtocol = qError{1, "protocol error"}
+	qErrorAuth     = qError{2, "auth error"}
+)
+
+type maxRate struct {
 	SendBPS uint64
 	RecvBPS uint64
 }
 
 type clientHello struct {
-	Rate    transmissionRate
+	Rate    maxRate
 	AuthLen uint16 `struc:"sizeof=Auth"`
 	Auth    []byte
 }
 
 type serverHello struct {
 	OK         bool
-	Rate       transmissionRate
+	Rate       maxRate
 	MessageLen uint16 `struc:"sizeof=Message"`
 	Message    string
 }
@@ -64,13 +76,4 @@ func (m udpMessage) HeaderSize() int {
 
 func (m udpMessage) Size() int {
 	return m.HeaderSize() + len(m.Data)
-}
-
-type udpMessageV2 struct {
-	SessionID uint32
-	HostLen   uint16 `struc:"sizeof=Host"`
-	Host      string
-	Port      uint16
-	DataLen   uint16 `struc:"sizeof=Data"`
-	Data      []byte
 }
