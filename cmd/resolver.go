@@ -18,22 +18,7 @@ func setResolver(dns string) error {
 		dns = "udp://" + net.JoinHostPort(dns, "53")
 	}
 	var r rdns.Resolver
-	if strings.HasPrefix(dns, "udp://") {
-		// Standard UDP DNS resolver
-		dns = strings.TrimPrefix(dns, "udp://")
-		if dns == "" {
-			return errInvalidSyntax
-		}
-		if _, _, err := utils.SplitHostPort(dns); err != nil {
-			// Append the default DNS port
-			dns = net.JoinHostPort(dns, "53")
-		}
-		client, err := rdns.NewDNSClient("dns-udp", dns, "udp", rdns.DNSClientOptions{})
-		if err != nil {
-			return err
-		}
-		r = client
-	} else if strings.HasPrefix(dns, "tcp://") {
+	if strings.HasPrefix(dns, "tcp://") {
 		// Standard TCP DNS resolver
 		dns = strings.TrimPrefix(dns, "tcp://")
 		if dns == "" {
@@ -113,7 +98,20 @@ func setResolver(dns string) error {
 		}
 		r = client
 	} else {
-		return errInvalidSyntax
+		// Standard UDP DNS resolver
+		dns = strings.TrimPrefix(dns, "udp://")
+		if dns == "" {
+			return errInvalidSyntax
+		}
+		if _, _, err := utils.SplitHostPort(dns); err != nil {
+			// Append the default DNS port
+			dns = net.JoinHostPort(dns, "53")
+		}
+		client, err := rdns.NewDNSClient("dns-udp", dns, "udp", rdns.DNSClientOptions{})
+		if err != nil {
+			return err
+		}
+		r = client
 	}
 	cache := rdns.NewCache("cache", r, rdns.CacheOptions{})
 	net.DefaultResolver = rdns.NewNetResolver(cache)
