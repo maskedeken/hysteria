@@ -346,6 +346,10 @@ type HyUDPConn interface {
 	ReadFrom() ([]byte, string, error)
 	WriteTo([]byte, string) error
 	Close() error
+	LocalAddr() net.Addr
+	SetDeadline(t time.Time) error
+	SetReadDeadline(t time.Time) error
+	SetWriteDeadline(t time.Time) error
 }
 
 type hyUDPConn struct {
@@ -419,4 +423,20 @@ func (c *hyUDPConn) WriteTo(p []byte, addr string) error {
 func (c *hyUDPConn) Close() error {
 	c.CloseFunc()
 	return c.Stream.Close()
+}
+
+func (c *hyUDPConn) LocalAddr() net.Addr {
+	return c.Session.LocalAddr()
+}
+
+func (c *hyUDPConn) SetDeadline(t time.Time) error {
+	return c.Stream.SetDeadline(t)
+}
+
+func (c *hyUDPConn) SetReadDeadline(t time.Time) error {
+	return c.Stream.SetReadDeadline(t)
+}
+
+func (c *hyUDPConn) SetWriteDeadline(t time.Time) error {
+	return c.Stream.SetWriteDeadline(t)
 }
