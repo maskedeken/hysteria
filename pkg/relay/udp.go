@@ -74,7 +74,7 @@ func (r *UDPRelay) ListenAndServe() error {
 			} else {
 				// New
 				r.ConnFunc(rAddr)
-				hyConn, err := r.HyClient.DialUDP()
+				hyConn, err := r.HyClient.DialUDP(nil)
 				if err != nil {
 					r.ErrorFunc(rAddr, err)
 				} else {

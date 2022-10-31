@@ -3,6 +3,7 @@ package pktconns
 import (
 	"net"
 
+	"github.com/HyNetwork/hysteria/pkg/transport"
 	"github.com/HyNetwork/hysteria/pkg/transport/pktconns/faketcp"
 	"github.com/HyNetwork/hysteria/pkg/transport/pktconns/obfs"
 	"github.com/HyNetwork/hysteria/pkg/transport/pktconns/udp"
@@ -10,7 +11,7 @@ import (
 )
 
 type (
-	ClientPacketConnFunc func(server string) (net.PacketConn, error)
+	ClientPacketConnFunc func(server string, dialer transport.PacketDialer) (net.PacketConn, error)
 	ServerPacketConnFunc func(listen string) (net.PacketConn, error)
 )
 
@@ -21,49 +22,49 @@ type (
 
 func NewClientUDPConnFunc(obfsPassword string) ClientPacketConnFunc {
 	if obfsPassword == "" {
-		return func(server string) (net.PacketConn, error) {
-			return net.ListenUDP("udp", nil)
+		return func(server string, dialer transport.PacketDialer) (net.PacketConn, error) {
+			return dialer.ListenPacket()
 		}
 	} else {
-		return func(server string) (net.PacketConn, error) {
+		return func(server string, dialer transport.PacketDialer) (net.PacketConn, error) {
 			ob := obfs.NewXPlusObfuscator([]byte(obfsPassword))
-			udpConn, err := net.ListenUDP("udp", nil)
+			pktConn, err := dialer.ListenPacket()
 			if err != nil {
 				return nil, err
 			}
-			return udp.NewObfsUDPConn(udpConn, ob), nil
+			return udp.NewObfsUDPConn(pktConn.(*net.UDPConn), ob), nil
 		}
 	}
 }
 
 func NewClientWeChatConnFunc(obfsPassword string) ClientPacketConnFunc {
 	if obfsPassword == "" {
-		return func(server string) (net.PacketConn, error) {
-			udpConn, err := net.ListenUDP("udp", nil)
+		return func(server string, dialer transport.PacketDialer) (net.PacketConn, error) {
+			pktConn, err := dialer.ListenPacket()
 			if err != nil {
 				return nil, err
 			}
-			return wechat.NewObfsWeChatUDPConn(udpConn, nil), nil
+			return wechat.NewObfsWeChatUDPConn(pktConn.(*net.UDPConn), nil), nil
 		}
 	} else {
-		return func(server string) (net.PacketConn, error) {
+		return func(server string, dialer transport.PacketDialer) (net.PacketConn, error) {
 			ob := obfs.NewXPlusObfuscator([]byte(obfsPassword))
-			udpConn, err := net.ListenUDP("udp", nil)
+			pktConn, err := dialer.ListenPacket()
 			if err != nil {
 				return nil, err
 			}
-			return wechat.NewObfsWeChatUDPConn(udpConn, ob), nil
+			return wechat.NewObfsWeChatUDPConn(pktConn.(*net.UDPConn), ob), nil
 		}
 	}
 }
 
 func NewClientFakeTCPConnFunc(obfsPassword string) ClientPacketConnFunc {
 	if obfsPassword == "" {
-		return func(server string) (net.PacketConn, error) {
+		return func(server string, dialer transport.PacketDialer) (net.PacketConn, error) {
 			return faketcp.Dial("tcp", server)
 		}
 	} else {
-		return func(server string) (net.PacketConn, error) {
+		return func(server string, dialer transport.PacketDialer) (net.PacketConn, error) {
 			ob := obfs.NewXPlusObfuscator([]byte(obfsPassword))
 			fakeTCPConn, err := faketcp.Dial("tcp", server)
 			if err != nil {

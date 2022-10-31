@@ -202,7 +202,7 @@ func (s *Server) handleTCP(c *net.TCPConn, r *socks5.Request) error {
 		closeErr = utils.PipePairWithTimeout(c, rc, s.TCPTimeout)
 		return nil
 	case acl.ActionProxy:
-		rc, err := s.HyClient.DialTCP(addr)
+		rc, err := s.HyClient.DialTCP(addr, nil)
 		if err != nil {
 			_ = sendReply(c, socks5.RepHostUnreachable)
 			closeErr = err
@@ -273,7 +273,7 @@ func (s *Server) handleUDP(c *net.TCPConn, r *socks5.Request) error {
 		defer localRelayConn.Close()
 	}
 	// HyClient UDP session
-	hyUDP, err := s.HyClient.DialUDP()
+	hyUDP, err := s.HyClient.DialUDP(nil)
 	if err != nil {
 		_ = sendReply(c, socks5.RepServerFailure)
 		closeErr = err

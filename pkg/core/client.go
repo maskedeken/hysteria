@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/HyNetwork/hysteria/pkg/transport"
 	"github.com/HyNetwork/hysteria/pkg/transport/pktconns"
 
 	"github.com/HyNetwork/hysteria/pkg/congestion"
@@ -60,13 +61,10 @@ func NewClient(serverAddr string, auth []byte, tlsConfig *tls.Config, quicConfig
 		pktConnFunc:       pktConnFunc,
 		quicReconnectFunc: quicReconnectFunc,
 	}
-	if err := c.connect(); err != nil {
-		return nil, err
-	}
 	return c, nil
 }
 
-func (c *Client) connect() error {
+func (c *Client) connect(dialer transport.PacketDialer) error {
 	// Clear previous connection
 	if c.quicConn != nil {
 		_ = c.quicConn.CloseWithError(0, "")
@@ -74,8 +72,11 @@ func (c *Client) connect() error {
 	if c.pktConn != nil {
 		_ = c.pktConn.Close()
 	}
+	if dialer == nil {
+		dialer = &transport.DefaultPacketDialer{}
+	}
 	// New connection
-	pktConn, err := c.pktConnFunc(c.serverAddr)
+	pktConn, err := c.pktConnFunc(c.serverAddr, dialer)
 	if err != nil {
 		return err
 	}
@@ -176,7 +177,7 @@ func (c *Client) handleMessage(qc quic.Connection) {
 	}
 }
 
-func (c *Client) openStreamWithReconnect() (quic.Connection, quic.Stream, error) {
+func (c *Client) openStreamWithReconnect(dialer transport.PacketDialer) (quic.Connection, quic.Stream, error) {
 	c.reconnectMutex.Lock()
 	defer c.reconnectMutex.Unlock()
 	if c.closed {
@@ -194,7 +195,7 @@ func (c *Client) openStreamWithReconnect() (quic.Connection, quic.Stream, error)
 	}
 	c.quicReconnectFunc(err)
 	// Permanent error, need to reconnect
-	if err := c.connect(); err != nil {
+	if err := c.connect(dialer); err != nil {
 		// Still error, oops
 		return nil, nil, err
 	}
@@ -203,12 +204,12 @@ func (c *Client) openStreamWithReconnect() (quic.Connection, quic.Stream, error)
 	return c.quicConn, &qStream{stream}, err
 }
 
-func (c *Client) DialTCP(addr string) (net.Conn, error) {
+func (c *Client) DialTCP(addr string, dialer transport.PacketDialer) (net.Conn, error) {
 	host, port, err := utils.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
 	}
-	session, stream, err := c.openStreamWithReconnect()
+	session, stream, err := c.openStreamWithReconnect(dialer)
 	if err != nil {
 		return nil, err
 	}
@@ -240,8 +241,8 @@ func (c *Client) DialTCP(addr string) (net.Conn, error) {
 	}, nil
 }
 
-func (c *Client) DialUDP() (HyUDPConn, error) {
-	session, stream, err := c.openStreamWithReconnect()
+func (c *Client) DialUDP(dialer transport.PacketDialer) (HyUDPConn, error) {
+	session, stream, err := c.openStreamWithReconnect(dialer)
 	if err != nil {
 		return nil, err
 	}

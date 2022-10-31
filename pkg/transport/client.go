@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"net"
 	"time"
 )
@@ -31,4 +32,19 @@ func (ct *ClientTransport) DialTCP(raddr *net.TCPAddr) (*net.TCPConn, error) {
 
 func (ct *ClientTransport) ListenUDP() (*net.UDPConn, error) {
 	return net.ListenUDP("udp", nil)
+}
+
+type PacketDialer interface {
+	ListenPacket() (net.PacketConn, error)
+	Context() context.Context
+}
+
+type DefaultPacketDialer struct{}
+
+func (dialer *DefaultPacketDialer) ListenPacket() (net.PacketConn, error) {
+	return net.ListenUDP("udp", nil)
+}
+
+func (dialer *DefaultPacketDialer) Context() context.Context {
+	return context.Background()
 }
