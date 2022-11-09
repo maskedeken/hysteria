@@ -55,7 +55,6 @@ func server(config *serverConfig) {
 				"error": err,
 			}).Fatal("Failed to get a certificate with ACME")
 		}
-		tc.NextProtos = []string{config.ALPN}
 		tc.MinVersion = tls.VersionTLS13
 		tlsConfig = tc
 	} else {
@@ -70,10 +69,27 @@ func server(config *serverConfig) {
 		}
 		tlsConfig = &tls.Config{
 			GetCertificate: kpl.GetCertificateFunc(),
-			NextProtos:     []string{config.ALPN},
 			MinVersion:     tls.VersionTLS13,
 		}
 	}
+
+	var alpns []string
+	if config.ALPN != nil {
+		switch config.ALPN.(type) {
+		case string:
+			alpns = append(alpns, config.ALPN.(string))
+		case []interface{}:
+			for _, s := range config.ALPN.([]interface{}) {
+				alpns = append(alpns, s.(string))
+			}
+		}
+	}
+	if len(alpns) > 0 {
+		tlsConfig.NextProtos = alpns
+	} else {
+		tlsConfig.NextProtos = []string{DefaultALPN}
+	}
+
 	// QUIC config
 	quicConfig := &quic.Config{
 		InitialStreamReceiveWindow:     config.ReceiveWindowConn,

@@ -56,14 +56,14 @@ type serverConfig struct {
 		Mode   string           `json:"mode"`
 		Config json5.RawMessage `json:"config"`
 	} `json:"auth"`
-	ALPN                string `json:"alpn"`
-	PrometheusListen    string `json:"prometheus_listen"`
-	ReceiveWindowConn   uint64 `json:"recv_window_conn"`
-	ReceiveWindowClient uint64 `json:"recv_window_client"`
-	MaxConnClient       int    `json:"max_conn_client"`
-	DisableMTUDiscovery bool   `json:"disable_mtu_discovery"`
-	Resolver            string `json:"resolver"`
-	ResolvePreference   string `json:"resolve_preference"`
+	ALPN                interface{} `json:"alpn"`
+	PrometheusListen    string      `json:"prometheus_listen"`
+	ReceiveWindowConn   uint64      `json:"recv_window_conn"`
+	ReceiveWindowClient uint64      `json:"recv_window_client"`
+	MaxConnClient       int         `json:"max_conn_client"`
+	DisableMTUDiscovery bool        `json:"disable_mtu_discovery"`
+	Resolver            string      `json:"resolver"`
+	ResolvePreference   string      `json:"resolve_preference"`
 	SOCKS5Outbound      struct {
 		Server   string `json:"server"`
 		User     string `json:"user"`
@@ -117,9 +117,6 @@ func (c *serverConfig) Check() error {
 }
 
 func (c *serverConfig) Fill() {
-	if len(c.ALPN) == 0 {
-		c.ALPN = DefaultALPN
-	}
 	if c.ReceiveWindowConn == 0 {
 		c.ReceiveWindowConn = DefaultStreamReceiveWindow
 	}
