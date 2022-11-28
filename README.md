@@ -6,17 +6,23 @@
 
 [2]: LICENSE.md
 
-[3]: https://img.shields.io/github/v/release/HyNetwork/hysteria?style=flat-square
+[3]: https://img.shields.io/github/v/release/apernet/hysteria?style=flat-square
 
-[4]: https://github.com/HyNetwork/hysteria/releases
+[4]: https://github.com/apernet/hysteria/releases
 
 [5]: https://img.shields.io/badge/chat-Telegram-blue?style=flat-square
 
 [6]: https://t.me/hysteria_github
 
-[7]: https://img.shields.io/github/discussions/HyNetwork/hysteria?style=flat-square
+[7]: https://img.shields.io/github/discussions/apernet/hysteria?style=flat-square
 
-[8]: https://github.com/HyNetwork/hysteria/discussions
+[8]: https://github.com/apernet/hysteria/discussions
+
+![AperNet](docs/logos/AperNetLogo.png)
+
+An [Aperture Internet Laboratory](https://apernet.io/) project
+
+----------
 
 Hysteria is a feature-packed proxy & relay tool optimized for lossy, unstable connections (e.g. satellite networks,
 congested public Wi-Fi, connecting to foreign servers from China) powered by a customized protocol based on QUIC.
@@ -76,6 +82,6 @@ Hysteria 是一个功能丰富的，专为恶劣网络环境（如卫星网络�
 
 **欢迎大佬捐赠！** 如希望挂名请在捐赠后联系我。
 
-Bitcoin: `bc1qzkfjy4vpm8hzu8haw0j6efzwczrjv7ntu4lzqu`
-
-Monero: `8ASufSipkvzDUge4dLnr9ZSFXpVn8M2Sea5G79DL5rFncnaKEAwqag8Xptpp8MSvpHiNtKxQgYtho3eDzW2nak4PJA84oBa`
+<a href="https://nowpayments.io/donation?api_key=EJH83FM-FDC40ZW-QGDZRR4-A7SC67S" target="_blank">
+ <img src="https://nowpayments.io/images/embeds/donation-button-black.svg" alt="Crypto donation button by NOWPayments">
+</a>
