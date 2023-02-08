@@ -104,6 +104,9 @@ func (c *serverConfig) Check() error {
 	if len(c.ACME.Domains) == 0 && (len(c.CertFile) == 0 || len(c.KeyFile) == 0) {
 		return errors.New("need either ACME info or cert/key files")
 	}
+	if len(c.ACME.Domains) > 0 && (len(c.CertFile) > 0 || len(c.KeyFile) > 0) {
+		return errors.New("cannot use both ACME and cert/key files, they are mutually exclusive")
+	}
 	if up, down, err := c.Speed(); err != nil || (up != 0 && up < minSpeedBPS) || (down != 0 && down < minSpeedBPS) {
 		return errors.New("invalid speed")
 	}
@@ -164,7 +167,7 @@ type clientConfig struct {
 	DownMbps int    `json:"down_mbps"`
 	// Optional below
 	Retry            int  `json:"retry"`
-	RetryInterval    int  `json:"retry_interval"`
+	RetryInterval    *int `json:"retry_interval"`
 	QuitOnDisconnect bool `json:"quit_on_disconnect"`
 	HandshakeTimeout int  `json:"handshake_timeout"`
 	IdleTimeout      int  `json:"idle_timeout"`

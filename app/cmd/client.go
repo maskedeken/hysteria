@@ -26,7 +26,7 @@ import (
 	"github.com/apernet/hysteria/core/acl"
 	"github.com/apernet/hysteria/core/cs"
 	"github.com/apernet/hysteria/core/transport"
-	"github.com/lucas-clemente/quic-go"
+	"github.com/quic-go/quic-go"
 	"github.com/sirupsen/logrus"
 )
 
@@ -152,11 +152,15 @@ func client(config *clientConfig) {
 		if err != nil {
 			logrus.WithField("error", err).Error("Failed to initialize client")
 			if try <= config.Retry || config.Retry < 0 {
+				retryInterval := 1
+				if config.RetryInterval != nil {
+					retryInterval = *config.RetryInterval
+				}
 				logrus.WithFields(logrus.Fields{
 					"retry":    try,
-					"interval": config.RetryInterval,
+					"interval": retryInterval,
 				}).Info("Retrying...")
-				time.Sleep(time.Duration(config.RetryInterval) * time.Second)
+				time.Sleep(time.Duration(retryInterval) * time.Second)
 			} else {
 				logrus.Fatal("Out of retries, exiting...")
 			}
