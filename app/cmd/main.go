@@ -114,7 +114,6 @@ var clientCmd = &cobra.Command{
 				"error": err,
 			}).Fatal("Failed to parse client configuration")
 		}
-		cc.FastOpen = true
 		client(cc)
 	},
 }
